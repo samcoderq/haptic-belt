@@ -10,5 +10,10 @@
 // danger assessment needs classification + context, which don't exist yet.
 enum class Priority { PRIORITY_LOW, PRIORITY_MEDIUM, PRIORITY_HIGH, PRIORITY_CRITICAL };
 
-Priority evaluatePriority(float eventScore, float eventConfidence, int repeatCount, int eventPersistFrames);
+// sameDirectionRepeatCount and isApproaching come from direction_memory, not
+// temporal_reasoner's generic (direction-agnostic) repeat count -- a real
+// recurring situation from one spot is a much stronger signal than
+// "something happened somewhere recently."
+Priority evaluatePriority(float eventScore, float eventConfidence, int sameDirectionRepeatCount,
+                           int eventPersistFrames, bool isApproaching);
 const char* priorityName(Priority p);
