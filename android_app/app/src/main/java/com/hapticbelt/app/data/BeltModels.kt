@@ -36,7 +36,16 @@ data class BeltState(
     // means a match fired for a slot this phone has no local record of
     // (e.g. enrolled from a different phone, or local data was cleared).
     val lastKeywordMatchName: String? = null,
-    val lastKeywordMatchAtMillis: Long? = null
+    val lastKeywordMatchAtMillis: Long? = null,
+    // Persists for the actual duration of a live call -- unlike
+    // classificationLabel/state above, which the belt's own ~10Hz real-time
+    // state stream overwrites within ~100ms regardless of what caused the
+    // last change. Set when NotificationMapper confirms an incoming call
+    // notification, cleared when NotificationCaptureService sees that same
+    // notification removed (answered/declined/ended) -- see
+    // BeltRepository.handleNotificationEvent / handleCallEnded.
+    val activeCallLabel: String? = null,
+    val activeCallPackage: String? = null
 )
 
 // One entry in the Live Awareness / history feed.

@@ -39,6 +39,14 @@ interface BeltRepository {
     // firmware that has no such packet type yet.
     fun handleNotificationEvent(event: CapturedNotification)
 
+    // Called by MainViewModel when NotificationCaptureService sees a
+    // previously-captured call notification actually removed (answered,
+    // declined, or the call ended) -- clears BeltState.activeCallLabel so
+    // the Dashboard's Phone card stops showing it as live. Only clears if
+    // [packageName] matches the currently-active call, so an unrelated
+    // notification from a different app being dismissed can't clear it.
+    fun handleCallEnded(packageName: String)
+
     // Called by SoundTrainingScreen once a class has enough recorded
     // samples: className + the centroid computed on-device from them
     // (GoertzelFeatures.computeCentroid over each sample's extractFeatures).
@@ -148,7 +156,7 @@ class MockBeltRepository : BeltRepository {
         val labels = listOf("UNKNOWN", "UNKNOWN", "UNKNOWN") // classifier isn't real yet -- don't fake specificity
         val label = labels.random()
 
-        val newState = BeltState(
+        _beltState.value = _beltState.value.copy(
             connected = true,
             direction = direction,
             directionConfidence = confidence,
@@ -161,7 +169,6 @@ class MockBeltRepository : BeltRepository {
             classificationLabel = label,
             lastEventAtMillis = System.currentTimeMillis()
         )
-        _beltState.value = newState
 
         val event = BeltEvent(
             id = nextEventId++,
@@ -183,7 +190,11 @@ class MockBeltRepository : BeltRepository {
     }
 
     override fun handleNotificationEvent(event: CapturedNotification) {
-        val newState = BeltState(
+        val label = if (event.isIncomingCall) "INCOMING CALL: ${event.appLabel}" else "PHONE: ${event.appLabel}"
+        // .copy(), not a fresh BeltState(...) -- preserves fields this event
+        // doesn't touch (lastKeywordMatchName, any already-active call from
+        // a different package, etc.) instead of silently resetting them.
+        _beltState.value = _beltState.value.copy(
             connected = true,
             direction = Direction.UNKNOWN,
             directionConfidence = 0f,
@@ -193,10 +204,11 @@ class MockBeltRepository : BeltRepository {
             priority = event.pattern.priority,
             sameDirectionRepeats = 0,
             trend = Trend.STABLE,
-            classificationLabel = "PHONE: ${event.appLabel}",
-            lastEventAtMillis = event.timestampMillis
+            classificationLabel = label,
+            lastEventAtMillis = event.timestampMillis,
+            activeCallLabel = if (event.isIncomingCall) label else _beltState.value.activeCallLabel,
+            activeCallPackage = if (event.isIncomingCall) event.packageName else _beltState.value.activeCallPackage
         )
-        _beltState.value = newState
 
         _eventHistory.value = (listOf(
             BeltEvent(
@@ -206,9 +218,14 @@ class MockBeltRepository : BeltRepository {
                 directionConfidence = 0f,
                 priority = event.pattern.priority,
                 eventConfidence = 1f,
-                classificationLabel = "PHONE: ${event.appLabel}"
+                classificationLabel = label
             )
         ) + _eventHistory.value).take(50)
+    }
+
+    override fun handleCallEnded(packageName: String) {
+        if (_beltState.value.activeCallPackage != packageName) return
+        _beltState.value = _beltState.value.copy(activeCallLabel = null, activeCallPackage = null)
     }
 
     override suspend fun uploadTrainedClass(className: String, centroid: FloatArray): Boolean {

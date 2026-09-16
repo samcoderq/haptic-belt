@@ -28,5 +28,10 @@ data class CapturedNotification(
     val packageName: String,
     val category: String?,
     val title: String?,
-    val pattern: HapticPattern
+    val pattern: HapticPattern,
+    // True only for a confirmed incoming ring (NotificationMapper's
+    // isRingingCall) -- lets the Dashboard's Phone card show "incoming
+    // call" specifically, distinct from every other notification that also
+    // happens to be CRITICAL (e.g. an alarm).
+    val isIncomingCall: Boolean = false
 )

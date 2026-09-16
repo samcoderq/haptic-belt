@@ -23,11 +23,22 @@ object NotificationMapper {
     // handled by the "callType unknown" fallback below.
     private const val EXTRA_CALL_TYPE = "android.callType" // Notification.EXTRA_CALL_TYPE
     private const val CALL_TYPE_INCOMING = 1 // Notification.CallStyle.CALL_TYPE_INCOMING
-    // CALL_TYPE_ONGOING = 2, CALL_TYPE_SCREENING = 3 -- deliberately not CRITICAL.
+    private const val CALL_TYPE_ONGOING = 2   // Notification.CallStyle.CALL_TYPE_ONGOING
+    private const val CALL_TYPE_SCREENING = 3 // Notification.CallStyle.CALL_TYPE_SCREENING
     // CATEGORY_CALL covers the whole call lifecycle (ringing, answered, outgoing),
     // not just an incoming ring -- confirmed on-device: calling out shows the same
-    // category=call with callType=2 (ONGOING). Without this check every call, not
-    // just incoming ones, would buzz CRITICAL.
+    // category=call with callType=2 (ONGOING).
+    //
+    // v2 (2026-09-16): flipped from "assume NOT incoming unless callType proves
+    // it" to "assume incoming unless callType proves otherwise" -- real-device
+    // test found WhatsApp's call notification sets category=call but never
+    // sets the CallStyle callType extra at all (that API is Android 12+ and
+    // plenty of VOIP apps, WhatsApp included, don't use it), so callType came
+    // back -1 (unknown) and the original conservative check silently dropped
+    // the notification before it ever reached the app -- worse than the
+    // false-positive risk (an already-answered/outgoing call briefly showing
+    // as "incoming") it was written to avoid. Only a callType that explicitly
+    // says ONGOING or SCREENING is now treated as not-incoming.
 
     /**
      * Returns null for notifications this bridge should ignore entirely --
@@ -54,7 +65,8 @@ object NotificationMapper {
         // incoming ring. If callType is missing (pre-CallStyle dialer), fall back
         // to MEDIUM rather than assume incoming -- a false "everything is urgent"
         // erodes trust in what CRITICAL means faster than a missed edge case does.
-        val isRingingCall = category == Notification.CATEGORY_CALL && callType == CALL_TYPE_INCOMING
+        val isRingingCall = category == Notification.CATEGORY_CALL &&
+            callType != CALL_TYPE_ONGOING && callType != CALL_TYPE_SCREENING
         val categoryIsCritical = isRingingCall || category == Notification.CATEGORY_ALARM
 
         val priority = overridePriority ?: when {
@@ -81,7 +93,8 @@ object NotificationMapper {
             packageName = sbn.packageName,
             category = category,
             title = title,
-            pattern = pattern
+            pattern = pattern,
+            isIncomingCall = isRingingCall
         )
     }
 

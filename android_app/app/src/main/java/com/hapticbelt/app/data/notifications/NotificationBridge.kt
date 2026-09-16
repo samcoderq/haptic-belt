@@ -36,6 +36,13 @@ object NotificationBridge {
     /** Events to actually relay into the active BeltRepository, consumed by MainViewModel. */
     val relayEvents: SharedFlow<CapturedNotification> = _relayEvents
 
+    // Package name of a notification NotificationCaptureService saw removed
+    // (answered/declined/ended) -- lets BeltRepository.handleCallEnded()
+    // clear activeCallLabel only when it's the SAME call that's ending, not
+    // an unrelated notification being dismissed. See NotificationCaptureService.
+    private val _callEndedEvents = MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val callEndedEvents: SharedFlow<String> = _callEndedEvents
+
     fun isEnabled(context: Context): Boolean =
         prefs(context).getBoolean(KEY_ENABLED, true)
 
@@ -52,6 +59,11 @@ object NotificationBridge {
     /** Clears the in-app log only -- does not affect the real notifications still on the phone. */
     fun clear() {
         _capturedEvents.value = emptyList()
+    }
+
+    /** Called by NotificationCaptureService when a call notification it previously captured is removed. */
+    fun recordCallEnded(packageName: String) {
+        _callEndedEvents.tryEmit(packageName)
     }
 
     private fun prefs(context: Context) =

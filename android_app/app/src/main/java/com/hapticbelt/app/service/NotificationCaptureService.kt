@@ -25,6 +25,14 @@ import com.hapticbelt.app.data.notifications.NotificationMapper
  */
 class NotificationCaptureService : NotificationListenerService() {
 
+    // Packages this service believes currently have a live captured call
+    // notification -- lets onNotificationRemoved() tell "the call ended"
+    // apart from "an unrelated notification from the same app was
+    // dismissed" (e.g. WhatsApp also posts message notifications). Instance
+    // state is fine here: the system keeps one instance alive for the whole
+    // listener binding, not one per callback.
+    private val activeCallPackages = mutableSetOf<String>()
+
     override fun onListenerConnected() {
         super.onListenerConnected()
         Log.i(TAG, "Notification listener connected")
@@ -37,7 +45,14 @@ class NotificationCaptureService : NotificationListenerService() {
         val appLabel = labelFor(sbn.packageName)
         val override = AppPatternPreferences.getOverride(applicationContext, sbn.packageName)
         val captured = NotificationMapper.classify(sbn, appLabel, override) ?: return
+        if (captured.isIncomingCall) activeCallPackages.add(sbn.packageName)
         NotificationBridge.record(captured)
+    }
+
+    override fun onNotificationRemoved(sbn: StatusBarNotification) {
+        if (activeCallPackages.remove(sbn.packageName)) {
+            NotificationBridge.recordCallEnded(sbn.packageName)
+        }
     }
 
     private fun labelFor(packageName: String): String {

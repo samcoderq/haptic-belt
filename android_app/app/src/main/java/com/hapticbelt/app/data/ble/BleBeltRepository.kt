@@ -160,7 +160,16 @@ class BleBeltRepository(private val context: Context) : BeltRepository {
         // updates the app's own visible state for now. A real belt will never
         // buzz from this until that gap is closed.
         Log.i(TAG, "handleNotificationEvent(${event.appLabel}, ${event.pattern.priority}): updating in-app state only -- no BLE packet type exists yet to relay this to firmware")
-        val newState = BeltState(
+        val label = if (event.isIncomingCall) "INCOMING CALL: ${event.appLabel}" else "PHONE: ${event.appLabel}"
+        // .copy(), not a fresh BeltState(...) -- preserves fields this event
+        // doesn't touch. Critical here specifically: without this, the very
+        // next ~10Hz Belt State packet from handleStatePacket() would still
+        // correctly carry activeCallLabel forward (that function reads
+        // `previous` explicitly), but starting from a half-reset state here
+        // was the root cause of the call info flashing and disappearing
+        // almost immediately -- see activeCallLabel's doc comment in
+        // BeltModels.kt.
+        _beltState.value = _beltState.value.copy(
             connected = _beltState.value.connected,
             direction = Direction.UNKNOWN,
             directionConfidence = 0f,
@@ -170,10 +179,11 @@ class BleBeltRepository(private val context: Context) : BeltRepository {
             priority = event.pattern.priority,
             sameDirectionRepeats = 0,
             trend = Trend.STABLE,
-            classificationLabel = "PHONE: ${event.appLabel}",
-            lastEventAtMillis = event.timestampMillis
+            classificationLabel = label,
+            lastEventAtMillis = event.timestampMillis,
+            activeCallLabel = if (event.isIncomingCall) label else _beltState.value.activeCallLabel,
+            activeCallPackage = if (event.isIncomingCall) event.packageName else _beltState.value.activeCallPackage
         )
-        _beltState.value = newState
 
         _eventHistory.value = (listOf(
             BeltEvent(
@@ -183,9 +193,14 @@ class BleBeltRepository(private val context: Context) : BeltRepository {
                 directionConfidence = 0f,
                 priority = event.pattern.priority,
                 eventConfidence = 1f,
-                classificationLabel = "PHONE: ${event.appLabel}"
+                classificationLabel = label
             )
         ) + _eventHistory.value).take(50)
+    }
+
+    override fun handleCallEnded(packageName: String) {
+        if (_beltState.value.activeCallPackage != packageName) return
+        _beltState.value = _beltState.value.copy(activeCallLabel = null, activeCallPackage = null)
     }
 
     override suspend fun uploadTrainedClass(className: String, centroid: FloatArray): Boolean {
@@ -479,7 +494,12 @@ class BleBeltRepository(private val context: Context) : BeltRepository {
                 previous.lastEventAtMillis
             },
             lastKeywordMatchName = if (keywordJustMatched) (keywordName ?: "Unknown keyword (slot ${decoded.keywordMatchSlot})") else previous.lastKeywordMatchName,
-            lastKeywordMatchAtMillis = if (keywordJustMatched) System.currentTimeMillis() else previous.lastKeywordMatchAtMillis
+            lastKeywordMatchAtMillis = if (keywordJustMatched) System.currentTimeMillis() else previous.lastKeywordMatchAtMillis,
+            // The belt has no concept of phone calls at all -- always carry
+            // these forward untouched here, same reasoning as the keyword
+            // fields above. See BeltModels.kt's activeCallLabel doc comment.
+            activeCallLabel = previous.activeCallLabel,
+            activeCallPackage = previous.activeCallPackage
         )
         _beltState.value = newState
 

@@ -68,6 +68,41 @@ fun DashboardScreen(repository: BeltRepository) {
         }
 
         item {
+            // Live phone/notification bar. Keys off BeltState.activeCallLabel
+            // specifically, NOT classificationLabel/state -- those two get
+            // overwritten by the belt's own ~10Hz real-time state stream
+            // within ~100ms regardless of what last changed them, which
+            // previously made this card flash on then immediately revert to
+            // "no active call" even while a call was still genuinely
+            // ringing. activeCallLabel persists across that stream (see
+            // BeltBeltRepository.handleStatePacket, which explicitly carries
+            // it forward) and is only cleared by a real onNotificationRemoved
+            // signal -- see BeltModels.kt's doc comment for the full story.
+            val activeCallLabel = state.activeCallLabel
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Phone", style = MaterialTheme.typography.titleMedium)
+                    if (activeCallLabel != null) {
+                        Text(
+                            "📞 Incoming call — ${activeCallLabel.removePrefix("INCOMING CALL: ")}",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = Color(0xFFEF4444),
+                            fontWeight = FontWeight.Bold
+                        )
+                    } else {
+                        Text("No active call.", color = Color.Gray)
+                    }
+                    Text(
+                        "Live from this phone's own notification listener (Notification Bridge must be " +
+                            "enabled) -- not read from the belt.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+                }
+            }
+        }
+
+        item {
             val lastMatchAt = state.lastKeywordMatchAtMillis
             val secondsAgo = lastMatchAt?.let { (System.currentTimeMillis() - it) / 1000 }
             val isFresh = secondsAgo != null && secondsAgo < 5

@@ -41,6 +41,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         }
+        // Clears BeltState.activeCallLabel when the call that set it actually
+        // ends -- see NotificationCaptureService.onNotificationRemoved and
+        // BeltModels.kt's activeCallLabel doc comment for why this needs its
+        // own signal separate from relayEvents above.
+        viewModelScope.launch {
+            NotificationBridge.callEndedEvents.collect { packageName ->
+                repository.handleCallEnded(packageName)
+            }
+        }
     }
 
     override fun onCleared() {
