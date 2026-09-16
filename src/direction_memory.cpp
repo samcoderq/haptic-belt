@@ -11,12 +11,24 @@ struct Entry {
 static Entry history[DIRECTION_HISTORY_SIZE];
 static int historyCount = 0;
 static unsigned long frameCounter = 0;
-static DirectionMemoryResult cached = {0, false, false};
+static DirectionMemoryResult cached = {0, false, false, false};
+
+// Habituation state -- deliberately separate from `history` above, which is
+// a short (DIRECTION_HISTORY_SIZE-slot, ~REPEAT_WINDOW_FRAMES-wide) ring
+// buffer for the sameDirectionRepeatCount/approaching calc. Habituation
+// needs to persist across a much longer timescale (many bursts over
+// minutes), so it's just a running streak count, not a windowed history.
+static Direction lastNoticeDir = Direction::UNKNOWN;
+static unsigned long lastNoticeFrame = 0;
+static int habituationStreak = 0;
 
 void directionMemoryInit() {
     historyCount = 0;
     frameCounter = 0;
-    cached = {0, false, false};
+    cached = {0, false, false, false};
+    lastNoticeDir = Direction::UNKNOWN;
+    lastNoticeFrame = 0;
+    habituationStreak = 0;
 }
 
 // Two directions count as "the same source" if they're identical, or one is
@@ -33,7 +45,7 @@ static bool directionsMatch(Direction a, Direction b) {
     return (strstr(na, nb) != nullptr) || (strstr(nb, na) != nullptr);
 }
 
-DirectionMemoryResult directionMemoryUpdate(Direction direction, float eventScore, bool isOnset) {
+DirectionMemoryResult directionMemoryUpdate(Direction direction, float eventScore, bool isOnset, bool isNoticeTier) {
     frameCounter++;
     if (!isOnset || direction == Direction::UNKNOWN) {
         return cached;
@@ -70,6 +82,26 @@ DirectionMemoryResult directionMemoryUpdate(Direction direction, float eventScor
         float change = (lateAvg - earlyAvg) / (earlyAvg > 0.01f ? earlyAvg : 0.01f);
         if (change >= APPROACHING_TREND_THRESHOLD) approaching = true;
         else if (change <= -APPROACHING_TREND_THRESHOLD) receding = true;
+    }
+
+    // ---- Habituation: NOTICE-tier onsets only. CANDIDATE/EVENT onsets
+    // always reset the streak (a real escalation, not background noise) but
+    // are never themselves suppressible -- only a NOTICE announce should
+    // ever be gated by `habituated`.
+    if (isNoticeTier) {
+        bool sameAsLastNotice = directionsMatch(lastNoticeDir, direction);
+        bool quietGapExpired = (frameCounter - lastNoticeFrame) > (unsigned long)HABITUATION_RESET_FRAMES;
+        if (sameAsLastNotice && !quietGapExpired && !approaching) {
+            habituationStreak++;
+        } else {
+            habituationStreak = 0;
+        }
+        lastNoticeDir = direction;
+        lastNoticeFrame = frameCounter;
+        cached.habituated = habituationStreak >= HABITUATION_STREAK_THRESHOLD;
+    } else {
+        habituationStreak = 0;
+        cached.habituated = false;
     }
 
     cached.sameDirectionRepeatCount = count;

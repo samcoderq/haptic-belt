@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Recorded samples: filesDir/sound_training/ -->
+    <files-path name="sound_training" path="sound_training/" />
+    <!-- Exported zip: cacheDir/training_export/ -->
+    <cache-path name="training_export" path="training_export/" />
+</paths>

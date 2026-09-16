@@ -16,6 +16,11 @@ static unsigned long lastToggleMs = 0;
 static bool unknownFlashActive = false;
 static unsigned long unknownFlashStartMs = 0;
 
+static bool keywordFlashActive = false;
+static unsigned long keywordFlashStartMs = 0;
+
+static bool criticalAcknowledged = false;
+
 static const char* lastOutputDesc = "OFF";
 static const char* lastPatternDesc = "NONE";
 
@@ -121,6 +126,21 @@ void updateOutput(Direction direction, float directionConfidence, AwarenessState
 
     unsigned long now = millis();
 
+    // Keyword match overlay -- checked before anything amplitude-pipeline-
+    // related so it's visible regardless of current state (including
+    // BACKGROUND, which would otherwise allOutputsOff() before this ever
+    // ran). Falls through to normal behavior once the flash duration ends.
+    if (keywordFlashActive) {
+        if (now - keywordFlashStartMs < LED_KEYWORD_FLASH_MS) {
+            bool all[MIC_COUNT] = {true, true, true, true};
+            writeLeds(all, LED_PWM_BRIGHT);
+            lastOutputDesc = "ALL (KEYWORD flash)";
+            lastPatternDesc = "KEYWORD";
+            return;
+        }
+        keywordFlashActive = false;
+    }
+
     // Stale CONTINUOUS pulsing shouldn't leak from CANDIDATE/CRITICAL-EVENT
     // into a state that no longer justifies it.
     if (state != AwarenessState::CANDIDATE && state != AwarenessState::EVENT) {
@@ -152,6 +172,7 @@ void updateOutput(Direction direction, float directionConfidence, AwarenessState
 
     switch (state) {
         case AwarenessState::BACKGROUND:
+            criticalAcknowledged = false;
             allOutputsOff();
             return;
 
@@ -173,6 +194,9 @@ void updateOutput(Direction direction, float directionConfidence, AwarenessState
 
         case AwarenessState::EVENT:
             if (eventJustAnnounced) {
+                // A fresh onset -- any previous acknowledgment applied to a
+                // different (now-past) event and no longer applies.
+                criticalAcknowledged = false;
                 int count = pulseCountForPriority(priority);
                 pulseMode = (count < 0) ? PulseMode::CONTINUOUS : PulseMode::FIXED_COUNT;
                 pulsesRemaining = (count < 0) ? 0 : count;
@@ -182,8 +206,10 @@ void updateOutput(Direction direction, float directionConfidence, AwarenessState
             } else if (pulseMode == PulseMode::NONE) {
                 // Pattern already finished -- hold solid ON, except CRITICAL,
                 // which keeps pulsing for the whole event (per spec: "rapid
-                // repeated pulses", not a fixed count).
-                if (priority == Priority::PRIORITY_CRITICAL) {
+                // repeated pulses", not a fixed count) -- unless the user
+                // has acknowledged it (acknowledgeCriticalAlert()), in which
+                // case it also just holds solid like any other priority.
+                if (priority == Priority::PRIORITY_CRITICAL && !criticalAcknowledged) {
                     pulseMode = PulseMode::CONTINUOUS;
                 } else {
                     writeLeds(dirLeds, brightness);
@@ -194,6 +220,7 @@ void updateOutput(Direction direction, float directionConfidence, AwarenessState
             break;
 
         case AwarenessState::COOLDOWN:
+            criticalAcknowledged = false;
             allOutputsOff();
             return;
     }
@@ -257,6 +284,22 @@ bool handleTestCommand(char c) {
     Serial.print(lastOutputDesc);
     Serial.println(" LED(s) ON (manual test)");
     return true;
+}
+
+void triggerKeywordFlash() {
+    keywordFlashActive = true;
+    keywordFlashStartMs = millis();
+}
+
+void acknowledgeCriticalAlert() {
+    criticalAcknowledged = true;
+    // Stop any active pulsing right away rather than waiting for the next
+    // updateOutput() call to notice via the EVENT/CRITICAL branch -- without
+    // this the LEDs would keep pulsing until the current on/off half-cycle
+    // ends (up to LED_PULSE_HALF_PERIOD_MS late).
+    if (pulseMode == PulseMode::CONTINUOUS) {
+        pulseMode = PulseMode::NONE;
+    }
 }
 
 bool isManualModeActive() { return manualMode; }

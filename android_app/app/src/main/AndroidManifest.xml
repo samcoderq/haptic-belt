@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Real BLE permissions. neverForLocation on BLUETOOTH_SCAN matters,
+         not just documentation: we only ever match scan results by device
+         name / service UUID, never derive location from them, and WITHOUT
+         this flag Android silently withholds every scan result unless
+         ACCESS_FINE_LOCATION is also granted (even on API 31+, even with
+         BLUETOOTH_SCAN granted). This was the actual cause of the belt
+         never being found on the first real hardware test: firmware was
+         genuinely advertising, the phone was genuinely scanning, but the OS
+         was dropping every result before it ever reached onScanResult(). -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Real runtime permission for the sound-training screen, which
+         records short labeled samples for offline classifier training;
+         see SoundTrainingScreen.kt. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <application
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="Haptic Belt"
+        android:theme="@style/Theme.HapticBelt"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:theme="@style/Theme.HapticBelt">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- Real notification-listener service: captures every notification
+             posted on the phone, once the user grants Notification Access in
+             system settings (a special permission, not a runtime dialog). -->
+        <service
+            android:name=".service.NotificationCaptureService"
+            android:exported="true"
+            android:label="Haptic Belt notification bridge"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+
+        <!-- Lets the sound-training screen share an exported dataset zip
+             (from cache/app-private storage) via a normal Share sheet,
+             without granting broad file access. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

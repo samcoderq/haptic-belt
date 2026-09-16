@@ -37,6 +37,14 @@ EventEvaluation evaluateEvent(const EnvironmentState &env) {
         WEIGHT_SPECTRAL * spectralScore
     );
 
+    // Damp by how much we trust the current baseline right now (see
+    // CONF_SCORE_DAMPING_MIN in config.h). A noisy/just-changed environment
+    // (low env.baselineConfidence) needs stronger evidence before this counts
+    // as a real event, specifically so the baseline gets a chance to adapt to
+    // the new noise floor instead of being repeatedly frozen by false triggers.
+    float confidenceScale = CONF_SCORE_DAMPING_MIN + (1.0f - CONF_SCORE_DAMPING_MIN) * env.baselineConfidence;
+    combined = clamp01(combined * confidenceScale);
+
     // Confidence: how tightly the three sub-scores agree. All three high (a
     // genuine broadband sudden loud sound) -> high confidence. Only one
     // spikes while the others stay near zero (e.g. a narrowband glitch) ->

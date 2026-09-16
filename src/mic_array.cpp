@@ -20,11 +20,19 @@ static const i2s_port_t I2S1_PORT = I2S_NUM_1;
 static int32_t bus0Buf[AUDIO_FRAME_SAMPLES * 2];
 static int32_t bus1Buf[AUDIO_FRAME_SAMPLES * 2];
 
+// Words actually read into bus0Buf/bus1Buf on the most recent
+// micArrayReadFrame() call -- remembered so micArrayGetRawSamples() knows
+// how much of the buffer is valid.
+static int lastWords0 = 0;
+static int lastWords1 = 0;
+
 // Per-mic persistent DSP state (high-pass filter memory + health streaks) --
 // four independent copies of exactly what audio_capture.cpp does for one mic.
 struct MicDsp {
     float hpPrevX = 0.0f;
     float hpPrevY = 0.0f;
+    float lpLow = 0.0f;   // PHASE 2: ~700Hz low-pass state, for band splitting
+    float lpHigh = 0.0f;  // PHASE 2: ~3000Hz low-pass state
     int   zeroStreak = 0;
     int   clipStreak = 0;
 };
@@ -74,15 +82,17 @@ bool micArrayInit() {
 // same features audio_capture.cpp computes for the single mic -- one
 // implementation, called 4 times with different state, not 4 copies.
 //
-// NOTE ON channelOffset: unverified against real hardware yet. With
-// I2S_CHANNEL_FMT_RIGHT_LEFT some ESP-IDF versions deliver [right, left]
-// per pair rather than [left, right]. If FRONT/RIGHT or BACK/LEFT turn out
-// swapped in testing, swap the two channelOffset arguments below (0<->1)
-// for that bus -- it's a labeling fix, not a wiring problem.
+// NOTE ON channelOffset: CONFIRMED correct via the individual-mic tap test
+// (each physical mic tapped alone lit the matching compass node every
+// time, ruling out a FRONT/RIGHT or BACK/LEFT swap) and consistent behavior
+// across every direction test since. If this is ever in doubt again, the
+// fix is swapping the two channelOffset arguments below (0<->1) for the
+// affected bus -- a labeling fix, not a wiring problem.
 static void computeChannelStats(const int32_t *buf, int totalWords, int channelOffset,
                                  MicrophoneFrame &frame, MicDsp &d) {
     int samplesRead = totalWords / 2;
     double sumSq = 0, sumAbs = 0, hpSumSq = 0;
+    double lowSumSq = 0, midSumSq = 0, highSumSq = 0;
     int32_t peak = 0;
     int zeroCrossings = 0;
     int32_t prevSample = 0;
@@ -106,6 +116,18 @@ static void computeChannelStats(const int32_t *buf, int totalWords, int channelO
         d.hpPrevX = x;
         d.hpPrevY = y;
         hpSumSq += (double)y * (double)y;
+
+        // PHASE 2: 3-band split via two cascaded one-pole low-pass filters
+        // (see config.h for the alpha->cutoff derivation and the
+        // approximation this makes).
+        d.lpLow += BAND_LOW_CUTOFF_ALPHA * (x - d.lpLow);
+        d.lpHigh += BAND_HIGH_CUTOFF_ALPHA * (x - d.lpHigh);
+        float lowSample = d.lpLow;
+        float midSample = d.lpHigh - d.lpLow;
+        float highSample = x - d.lpHigh;
+        lowSumSq += (double)lowSample * lowSample;
+        midSumSq += (double)midSample * midSample;
+        highSumSq += (double)highSample * highSample;
     }
 
     frame.rms = (float)sqrt(sumSq / samplesRead);
@@ -116,6 +138,10 @@ static void computeChannelStats(const int32_t *buf, int totalWords, int channelO
     double rawEnergy = sumSq + 1e-6;
     float ratio = (float)(hpSumSq / rawEnergy);
     frame.highFreqRatio = ratio > 1.0f ? 1.0f : (ratio < 0.0f ? 0.0f : ratio);
+
+    frame.lowEnergy = (float)sqrt(lowSumSq / samplesRead);
+    frame.midEnergy = (float)sqrt(midSumSq / samplesRead);
+    frame.highEnergy = (float)sqrt(highSumSq / samplesRead);
 
     if (frame.rms <= 0.5f) d.zeroStreak++; else d.zeroStreak = 0;
     if (frame.peak >= MIC_CLIP_PEAK_THRESHOLD) d.clipStreak++; else d.clipStreak = 0;
@@ -130,6 +156,8 @@ bool micArrayReadFrame(MicArrayFrame &out) {
 
     int words0 = bytes0 / sizeof(int32_t);
     int words1 = bytes1 / sizeof(int32_t);
+    lastWords0 = words0;
+    lastWords1 = words1;
 
     computeChannelStats(bus0Buf, words0, 0, out.mic[MIC_FRONT], dsp[MIC_FRONT]);
     computeChannelStats(bus0Buf, words0, 1, out.mic[MIC_RIGHT], dsp[MIC_RIGHT]);
@@ -137,9 +165,13 @@ bool micArrayReadFrame(MicArrayFrame &out) {
     computeChannelStats(bus1Buf, words1, 1, out.mic[MIC_LEFT],  dsp[MIC_LEFT]);
 
     for (int m = 0; m < MIC_COUNT; m++) {
+        out.mic[m].rawRms = out.mic[m].rms;  // pre-calibration, for diagnostics only
         out.mic[m].rms *= calibrationGain[m];
         out.mic[m].peak *= calibrationGain[m];
         out.mic[m].avgAbs *= calibrationGain[m];
+        out.mic[m].lowEnergy *= calibrationGain[m];
+        out.mic[m].midEnergy *= calibrationGain[m];
+        out.mic[m].highEnergy *= calibrationGain[m];
     }
 
     return true;
@@ -176,4 +208,23 @@ void micArrayCalibrate(int numFrames, float outGains[MIC_COUNT], float outAvgRms
         outGains[m] = calibrationGain[m];
         outAvgRms[m] = avg[m];
     }
+}
+
+int micArrayGetRawSamples(int micIdx, int32_t *outSamples, int maxSamples) {
+    const int32_t *buf;
+    int channelOffset;
+    int words;
+    switch (micIdx) {
+        case MIC_FRONT: buf = bus0Buf; channelOffset = 0; words = lastWords0; break;
+        case MIC_RIGHT: buf = bus0Buf; channelOffset = 1; words = lastWords0; break;
+        case MIC_BACK:  buf = bus1Buf; channelOffset = 0; words = lastWords1; break;
+        case MIC_LEFT:  buf = bus1Buf; channelOffset = 1; words = lastWords1; break;
+        default: return 0;
+    }
+    int available = words / 2;
+    int n = available < maxSamples ? available : maxSamples;
+    for (int i = 0; i < n; i++) {
+        outSamples[i] = buf[i * 2 + channelOffset] >> 14;
+    }
+    return n;
 }

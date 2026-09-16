@@ -1,5 +1,6 @@
 #include "temporal_reasoner.h"
 #include "config.h"
+#include "runtime_config.h"
 #include <math.h>
 
 static AwarenessState state = AwarenessState::BACKGROUND;
@@ -120,14 +121,14 @@ TemporalResult temporalReasonerUpdate(float eventScore) {
     switch (state) {
         case AwarenessState::BACKGROUND:
             eventPersistFrames = 0;
-            if (eventScore >= INSTANT_THRESHOLD) {
+            if (eventScore >= g_instantThreshold) {
                 enterEvent(now, out);
                 noticeSustainCounter = 0;
-            } else if (eventScore >= CANDIDATE_THRESHOLD) {
+            } else if (eventScore >= g_candidateThreshold) {
                 state = AwarenessState::CANDIDATE;
                 candidateFrames = 1;
                 noticeSustainCounter = 0;
-            } else if (eventScore >= NOTICE_ENTER_THRESHOLD) {
+            } else if (eventScore >= g_noticeEnterThreshold) {
                 // Weak band: require it to actually sustain before it's worth
                 // surfacing at all -- a single brief nearby blip should never
                 // reach the user, only something that keeps going.
@@ -149,14 +150,14 @@ TemporalResult temporalReasonerUpdate(float eventScore) {
 
         case AwarenessState::NOTICE:
             noticePersistFrames++;
-            if (eventScore >= INSTANT_THRESHOLD) {
+            if (eventScore >= g_instantThreshold) {
                 enterEvent(now, out);
                 noticePersistFrames = 0;
-            } else if (eventScore >= CANDIDATE_THRESHOLD) {
+            } else if (eventScore >= g_candidateThreshold) {
                 state = AwarenessState::CANDIDATE;
                 candidateFrames = 1;
                 noticePersistFrames = 0;
-            } else if (eventScore < NOTICE_EXIT_THRESHOLD) {
+            } else if (eventScore < g_noticeExitThreshold) {
                 state = AwarenessState::BACKGROUND;
                 noticeSustainCounter = 0;
                 noticePersistFrames = 0;
@@ -174,14 +175,14 @@ TemporalResult temporalReasonerUpdate(float eventScore) {
             break;
 
         case AwarenessState::CANDIDATE:
-            if (eventScore >= INSTANT_THRESHOLD) {
+            if (eventScore >= g_instantThreshold) {
                 enterEvent(now, out);
-            } else if (eventScore >= CANDIDATE_THRESHOLD) {
+            } else if (eventScore >= g_candidateThreshold) {
                 candidateFrames++;
                 if (candidateFrames >= CONFIRM_FRAMES) {
                     enterEvent(now, out);
                 }
-            } else if (eventScore >= NOTICE_ENTER_THRESHOLD) {
+            } else if (eventScore >= g_noticeEnterThreshold) {
                 // Already proved itself substantial (crossed 0.5 at least once) --
                 // no extra sustain gate needed, unlike a fresh weak-band signal.
                 state = AwarenessState::NOTICE;
@@ -202,7 +203,7 @@ TemporalResult temporalReasonerUpdate(float eventScore) {
         case AwarenessState::EVENT:
             eventPersistFrames++;
             noticePersistFrames = 0;
-            if (eventScore < DEACTIVATE_THRESHOLD) {
+            if (eventScore < g_deactivateThreshold) {
                 state = AwarenessState::COOLDOWN;
                 cooldownFrames = COOLDOWN_FRAMES;
             }

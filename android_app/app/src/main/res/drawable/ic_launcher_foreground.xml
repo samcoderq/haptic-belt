@@ -1,0 +1,18 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Belt ring with a directional dot at "front", simple mark, not final branding -->
+    <path
+        android:pathData="M54,20 A34,34 0 1 1 53.9,20 Z"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M54,54 m-8,0 a8,8 0 1 1 16,0 a8,8 0 1 1 -16,0"
+        android:fillColor="#FF5252" />
+    <path
+        android:pathData="M54,14 m-6,0 a6,6 0 1 1 12,0 a6,6 0 1 1 -12,0"
+        android:fillColor="#4CAF50" />
+</vector>

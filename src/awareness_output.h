@@ -14,6 +14,23 @@
 void awarenessOutputInit();
 void allOutputsOff();
 
+// Brief all-LED flash, independent of the amplitude-driven pulse state
+// machine below -- for keyword_detector.cpp's matches, which can happen
+// regardless of what the amplitude pipeline is currently doing (BACKGROUND,
+// mid-EVENT-pulse, etc.) and shouldn't corrupt that state. Same "overlay,
+// then fall through to normal behavior" pattern already used for an
+// UNKNOWN-direction flash inside updateOutput() -- not a second independent
+// state machine to keep in sync, just a brief preemption.
+void triggerKeywordFlash();
+
+// Call when a BLE Acknowledge write matches the currently outstanding
+// eventSeq (ble_server.cpp) -- stops a CRITICAL event's continuous pulsing
+// immediately (holds solid instead) without waiting for the amplitude
+// pipeline to naturally decay the sound out of EVENT state. Resets
+// automatically on the next fresh event onset or once state leaves EVENT,
+// so it never permanently suppresses future CRITICAL alerts.
+void acknowledgeCriticalAlert();
+
 // Call once per loop() iteration with the latest pipeline results. Runs a
 // non-blocking pulse/flash state machine internally (millis()-based, no
 // delay() calls) so it never affects audio timing.
