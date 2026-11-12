@@ -1,3 +1,6 @@
+(a project very close to my heart, my first ever hardware implementation)
+
+
 # Haptic Safety Belt for Deaf & Hard-of-Hearing Users
 
 A wearable **haptic alert and health-monitoring belt** designed to convert important environmental and physiological events into **vibration-based feedback**.
